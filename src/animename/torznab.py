@@ -18,13 +18,26 @@ from xml.sax.saxutils import escape
 
 SEARCH_TYPES = frozenset({"search", "tvsearch"})
 
-# "... S01E05", "... S01E05-E06", "... S02", "... 1x05", "... Season 2"
+# "S01E05", "S01E05-E06", "S02", "1x05", "Season 2", "2nd Season", "Part 2",
+# в том числе в скобках: "(Season 2)", "[S02]". Хвост может состоять из нескольких таких токенов.
+_EP_TOKEN = (
+    r"(?:S\d{1,2}(?:E\d{1,4}(?:-?E?\d{1,4})?)?|E\d{1,4}|\d{1,2}x\d{2,3}"
+    r"|Season\s*\d{1,2}|\d{1,2}(?:st|nd|rd|th)\s+Season|(?:Part|Cour)\s*\d{1,2})"
+)
 TRAILING_EP_RE = re.compile(
-    r"(?:[\s.+]+(?:S\d{1,2}(?:E\d{1,4}(?:-?E?\d{1,4})?)?|E\d{1,4}|\d{1,2}x\d{2,3}|Season\s*\d{1,2}))+\s*$",
+    rf"(?:[\s.+\-–:]+(?:{_EP_TOKEN}|[(\[]\s*{_EP_TOKEN}\s*[)\]]))+\s*$",
     re.IGNORECASE,
 )
 # Для аниме Sonarr шлёт "Title 05": абсолютный номер серии, минимум две цифры.
 TRAILING_NUM_RE = re.compile(r"\s+\d{2,4}\s*$")
+
+EMPTY_FEED_TEMPLATE = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" '
+    'xmlns:torznab="http://torznab.com/schemas/2015/feed">'
+    "<channel><title>animename</title><description>{reason}</description>"
+    '<torznab:response offset="0" total="0"/></channel></rss>\n'
+)
 
 ITEM_RE = re.compile(r"<item\b[^>]*>.*?</item>", re.S)
 TITLE_RE = re.compile(r"(<title\b[^>]*>)(.*?)(</title>)", re.S)
@@ -43,12 +56,25 @@ def query_type(query: str) -> str:
     return ""
 
 
+def query_param(query: str, name: str) -> str | None:
+    for key, value in parse_qsl(query, keep_blank_values=True):
+        if key == name:
+            return value
+    return None
+
+
 def clean_query(q: str, *, search_type: str) -> str:
     q = " ".join(q.split())
-    q = TRAILING_EP_RE.sub("", q)
+    # Номер серии Sonarr дописывает последним, поэтому сначала он, потом S02/Season 2.
     if search_type == "search":
         q = TRAILING_NUM_RE.sub("", q)
+    q = TRAILING_EP_RE.sub("", q)
     return q.strip()
+
+
+def empty_feed(reason: str) -> bytes:
+    """Пустой Torznab-ответ: Sonarr видит канал без элементов и считает, что результатов нет."""
+    return EMPTY_FEED_TEMPLATE.format(reason=escape(reason)).encode("utf-8")
 
 
 def rewrite_query(query: str, *, forward_season: bool = False) -> str:

@@ -3,7 +3,7 @@ from urllib.parse import parse_qsl
 import pytest
 
 from animename.render import Converter
-from animename.torznab import clean_query, rewrite_feed, rewrite_query
+from animename.torznab import clean_query, empty_feed, query_param, rewrite_feed, rewrite_query
 
 FEED = """<?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
@@ -46,6 +46,17 @@ FEED = """<?xml version="1.0" encoding="utf-8"?>
         ("t=search&q=Title+Season+2", "Title", False),
         ("t=tvsearch&q=Mob+Psycho+100&season=2&ep=3", "Mob Psycho 100", False),
         ("t=tvsearch&q=Shingeki%20no%20Kyojin%20S01E05-E06", "Shingeki no Kyojin", False),
+        # скобки
+        ("t=tvsearch&q=Shingeki+no+Kyojin+(Season+2)", "Shingeki no Kyojin", False),
+        ("t=tvsearch&q=Attack+on+Titan+[S02]", "Attack on Titan", False),
+        ("t=search&q=Shingeki+no+Kyojin+(Season+2)+05", "Shingeki no Kyojin", False),
+        # порядковые сезоны, части, разделители
+        ("t=search&q=Re%3AZero+2nd+Season+05", "Re:Zero", False),
+        ("t=search&q=Attack+on+Titan+Season+3+Part+2+05", "Attack on Titan", False),
+        ("t=tvsearch&q=Title+-+Season+2", "Title", False),
+        ("t=tvsearch&q=Title.S01E05", "Title", False),
+        # год в скобках не сезон
+        ("t=search&q=Hunter+x+Hunter+(2011)+05", "Hunter x Hunter (2011)", False),
     ],
 )
 def test_rewrite_query_cleans_title(query, expected_q, expect_season):
@@ -79,6 +90,28 @@ def test_rewrite_query_without_q():
 def test_clean_query_tvsearch_keeps_trailing_number():
     assert clean_query("Mob Psycho 100", search_type="tvsearch") == "Mob Psycho 100"
     assert clean_query("Mob Psycho 100", search_type="search") == "Mob Psycho"
+
+
+def test_clean_query_collapses_variants():
+    variants = ["Attack on Titan S2", "Attack on Titan Season 2", "Attack on Titan (Season 2)", "Attack on Titan"]
+    assert {clean_query(v, search_type="tvsearch") for v in variants} == {"Attack on Titan"}
+
+
+def test_query_param():
+    assert query_param("t=search&q=Foo+Bar&cat=5070", "q") == "Foo Bar"
+    assert query_param("t=search&cat=5070", "q") is None
+
+
+def test_empty_feed_is_valid_torznab():
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(empty_feed('skipped <by> "QUERY_SKIP" & co'))
+    assert root.tag == "rss"
+    channel = root.find("channel")
+    assert channel.findall("item") == []
+    assert channel.find("description").text == 'skipped <by> "QUERY_SKIP" & co'
+    ns = {"torznab": "http://torznab.com/schemas/2015/feed"}
+    assert channel.find("torznab:response", ns).get("total") == "0"
 
 
 def test_rewrite_feed_rewrites_only_titles():

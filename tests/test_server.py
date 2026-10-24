@@ -159,6 +159,79 @@ def test_public_url_rewrites_links(upstream):
     assert upstream not in text
 
 
+def api_calls():
+    return [params for path, params, _ in FakeProwlarr.requests if path == "/1/api"]
+
+
+def test_cache_dedups_query_variants(proxy):
+    seen = []
+    for q in ("Attack+on+Titan+S2", "Attack+on+Titan+(Season+2)", "Attack+on+Titan"):
+        status, headers, body = get(proxy + f"/1/api?t=tvsearch&q={q}&cat=5070&apikey=KEY")
+        assert status == 200
+        assert "<title>Shingeki no Kyojin S01 [BDRip 1080p]</title>" in body.decode()
+        seen.append(headers["X-Animename-Cache"])
+    assert seen == ["MISS", "HIT", "HIT"]
+    assert api_calls() == [{"t": "tvsearch", "q": "Attack on Titan", "cat": "5070", "apikey": "KEY"}]
+
+
+def test_cache_separates_pages_and_skips_rss(proxy):
+    get(proxy + "/1/api?t=tvsearch&q=Foo&offset=0&apikey=KEY")
+    get(proxy + "/1/api?t=tvsearch&q=Foo&offset=100&apikey=KEY")
+    _, headers, _ = get(proxy + "/1/api?t=tvsearch&cat=5070&apikey=KEY")  # RSS без q
+    assert "X-Animename-Cache" not in headers
+    get(proxy + "/1/api?t=tvsearch&cat=5070&apikey=KEY")
+    assert len(api_calls()) == 4
+
+
+def test_cache_disabled(upstream):
+    server, url = make_proxy(upstream, cache_ttl=0)
+    try:
+        for _ in range(2):
+            _, headers, _ = get(url + "/1/api?t=search&q=Foo&apikey=KEY")
+            assert "X-Animename-Cache" not in headers
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert len(api_calls()) == 2
+
+
+def test_errors_are_not_cached(proxy):
+    for _ in range(2):
+        with pytest.raises(HTTPError) as exc:
+            get(proxy + "/1/api?t=search&q=Foo&apikey=WRONG")
+        assert exc.value.code == 401
+    assert len(api_calls()) == 2
+
+
+def test_query_skip_returns_empty_feed(upstream):
+    import xml.etree.ElementTree as ET
+
+    server, url = make_proxy(upstream, query_skip="Ataque|Attaque|attacco")
+    try:
+        status, headers, body = get(url + "/1/api?t=search&q=Ataque+de+los+Titanes+05&apikey=KEY")
+        assert status == 200
+        assert headers["Content-Type"].startswith("application/rss+xml")
+        assert headers["X-Animename-Cache"] == "SKIP"
+        assert ET.fromstring(body).find("channel").findall("item") == []
+        assert api_calls() == []
+
+        # обычный запрос проходит как раньше
+        _, _, body = get(url + "/1/api?t=search&q=Attack+on+Titan+05&apikey=KEY")
+        assert "Shingeki no Kyojin S01" in body.decode()
+        assert len(api_calls()) == 1
+        # caps не фильтруется
+        _, _, body = get(url + "/1/api?t=caps&apikey=KEY")
+        assert body == CAPS
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_invalid_query_skip_fails_fast(upstream):
+    with pytest.raises(ValueError, match="QUERY_SKIP"):
+        make_proxy(upstream, query_skip="(")
+
+
 def test_upstream_down_gives_502():
     server, url = make_proxy("http://127.0.0.1:9")  # discard-порт, никто не слушает
     try:

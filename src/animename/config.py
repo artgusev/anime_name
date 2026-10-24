@@ -34,6 +34,13 @@ class Settings:
     public_url: str | None = None
     log_level: str = "INFO"
     upstream_timeout: float = 60.0
+    # Кэш ответов на поисковые запросы с q: после очистки "Title S2", "Title Season 2" и "Title"
+    # становятся одним запросом, и Prowlarr получает его один раз. 0 выключает кэш.
+    cache_ttl: float = 300.0
+    cache_size: int = 256
+    # Регулярное выражение (без учёта регистра): запросы с таким q сразу получают пустой RSS.
+    # Удобно отсекать альтернативные названия с TVDB на других языках: "Ataque|Attaque|attacco".
+    query_skip: str = ""
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":

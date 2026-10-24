@@ -9,6 +9,8 @@ services:
       OVERRIDES_FILE: /config/overrides.toml   # уберите, если файл не нужен
       PACK_STYLE: season                        # season | range
       MAX_EPISODES: "100"
+      CACHE_TTL: "300"                          # секунды; 0 выключает кэш ответов
+      # QUERY_SKIP: "Ataque|Attaque|attacco"    # алиасы на других языках сразу получают пустой RSS
       LOG_LEVEL: INFO                           # DEBUG покажет и нераспознанные заголовки
     volumes:
       - ./config:/config:ro

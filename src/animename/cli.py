@@ -35,6 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--host", metavar="HOST")
     s.add_argument("--port", type=int, metavar="PORT")
     s.add_argument("--overrides", metavar="FILE")
+    s.add_argument("--cache-ttl", type=float, metavar="SECONDS", help="0 выключает кэш ответов")
+    s.add_argument("--query-skip", metavar="REGEX", help="запросы с таким q получают пустой RSS")
     s.add_argument("--log-level", metavar="LEVEL")
     return p
 
@@ -45,6 +47,7 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
         "overrides": "overrides_file", "pack_style": "pack_style", "max_episodes": "max_episodes",
         "title_pick": "title_pick", "release_group": "release_group", "upstream": "upstream_url",
         "host": "listen_host", "port": "listen_port", "log_level": "log_level",
+        "cache_ttl": "cache_ttl", "query_skip": "query_skip",
     }
     for arg, attr in mapping.items():
         value = getattr(args, arg, None)

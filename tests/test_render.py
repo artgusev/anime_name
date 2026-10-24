@@ -71,11 +71,15 @@ def test_settings_from_env(tmp_path):
             "RELEASE_GROUP": "RuTracker",
             "PUBLIC_URL": "http://animename:8080/",
             "OVERRIDES_FILE": str(path),
+            "CACHE_TTL": "600",
+            "CACHE_SIZE": "32",
+            "QUERY_SKIP": "Ataque|Attaque",
         }
     )
     assert s.upstream_url == "http://prowlarr:9696"
     assert s.public_url == "http://animename:8080"
     assert (s.listen_port, s.max_episodes, s.forward_season) == (9000, 50, True)
+    assert (s.cache_ttl, s.cache_size, s.query_skip) == (600.0, 32, "Ataque|Attaque")
     conv = s.converter()
     assert conv.options == RenderOptions(pack_style="range", max_episodes=50, release_group="RuTracker")
     assert len(conv.overrides) == 1
@@ -85,4 +89,5 @@ def test_settings_defaults():
     s = Settings.from_env({})
     assert s.upstream_url == "http://prowlarr:9696"
     assert s.listen_port == 8080
+    assert (s.cache_ttl, s.cache_size, s.query_skip) == (300.0, 256, "")
     assert s.converter().overrides == []

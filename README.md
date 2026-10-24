@@ -23,9 +23,18 @@ Sonarr  --Torznab-->  animename  --Torznab-->  Prowlarr  -->  RuTracker
         <--  RSS с переписанными <title>  <--  RSS как есть
 ```
 
-* **Запросы.** Sonarr добавляет к названию номер серии (`Shingeki no Kyojin 05`, `Title S01E05`)
-  и параметры `season`/`ep`. RuTracker по таким строкам ничего не находит, поэтому прокси
-  отрезает хвост и не передаёт `season`/`ep` дальше. Фильтрацию по сериям Sonarr делает сам.
+* **Запросы.** Sonarr добавляет к названию номер серии (`Shingeki no Kyojin 05`, `Title S01E05`,
+  `Title (Season 2)`) и параметры `season`/`ep`. RuTracker по таким строкам ничего не находит,
+  поэтому прокси отрезает хвост и не передаёт `season`/`ep` дальше. Фильтрацию по сериям
+  Sonarr делает сам.
+* **Дедупликация.** Sonarr перебирает все алиасы сериала: `Attack on Titan S2`,
+  `Attack on Titan Season 2`, `Attack on Titan`. После очистки это один и тот же запрос, и
+  ответ на него берётся из кэша (`CACHE_TTL`, по умолчанию 5 минут). RSS-запросы без `q`
+  не кэшируются, чтобы не задерживать новинки. Заголовок ответа `X-Animename-Cache`
+  показывает `HIT`, `MISS` или `SKIP`.
+* **Пропуск.** Алиасы с TVDB на других языках (`Ataque de los Titanes`, `L'Attaque des Titans`)
+  на RuTracker бесполезны. Регулярное выражение в `QUERY_SKIP` отсекает такие запросы:
+  прокси сразу отвечает пустым RSS, не трогая Prowlarr.
 * **Ответы.** В каждом `<item>` меняется только текст `<title>`. Всё остальное, включая `guid`
   и ссылки на скачивание, уходит в Sonarr байт в байт. Заголовки, которые не удалось
   распознать, остаются как были.
@@ -79,6 +88,9 @@ Sonarr  --Torznab-->  animename  --Torznab-->  Prowlarr  -->  RuTracker
 | `TITLE_PICK` | `first` | Какую латинскую часть брать за название: `first` (обычно ромадзи) или `last` (обычно английское) |
 | `FORWARD_SEASON` | `false` | Передавать ли `season`/`ep` в Prowlarr. Для аниме на RuTracker это мешает |
 | `PUBLIC_URL` | | Адрес прокси, на который переписывать ссылки скачивания |
+| `CACHE_TTL` | `300` | Сколько секунд хранить ответы на поисковые запросы с `q`. `0` выключает кэш |
+| `CACHE_SIZE` | `256` | Сколько ответов держать в кэше, старые вытесняются |
+| `QUERY_SKIP` | | Регулярное выражение без учёта регистра, например `Ataque\|Attaque\|attacco`. Запросы с таким `q` получают пустой RSS без обращения к Prowlarr |
 | `LOG_LEVEL` | `INFO` | `DEBUG` покажет каждый проксируемый запрос и нераспознанные заголовки |
 | `UPSTREAM_TIMEOUT` | `60` | Таймаут запроса к Prowlarr, секунды |
 
@@ -138,7 +150,7 @@ animename convert --json --overrides config/overrides.toml < titles.txt
 Запуск сервера без Docker:
 
 ```bash
-UPSTREAM_URL=http://localhost:9696 animename serve --port 8080
+UPSTREAM_URL=http://localhost:9696 animename serve --port 8080 --query-skip "Ataque|Attaque"
 ```
 
 ## Разработка
