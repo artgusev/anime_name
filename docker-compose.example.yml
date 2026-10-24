@@ -9,7 +9,7 @@ services:
       OVERRIDES_FILE: /config/overrides.toml   # уберите, если файл не нужен
       PACK_STYLE: season                        # season | range
       MAX_EPISODES: "100"
-      CACHE_TTL: "300"                          # секунды; 0 выключает кэш ответов
+      CACHE_TTL: "600"                          # секунды; 0 выключает кэш ответов
       QUERY_LANGUAGES: ru,en                    # запросы на других языках сразу получают пустой RSS; any выключает
       # QUERY_ALLOW: "Chevalier"                # исключения: такие запросы идут в Prowlarr всегда
       # QUERY_SKIP: "Ataque|Attaque|attacco"    # исключения: такие запросы не идут никогда

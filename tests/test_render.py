@@ -95,7 +95,7 @@ def test_settings_defaults():
     s = Settings.from_env({})
     assert s.upstream_url == "http://prowlarr:9696"
     assert s.listen_port == 8080
-    assert (s.cache_ttl, s.cache_size, s.query_skip) == (300.0, 256, "")
+    assert (s.cache_ttl, s.cache_size, s.query_skip) == (600.0, 256, "")
     assert s.query_languages == "ru,en"
     assert s.query_filter().languages == frozenset({"ru", "en"})
     assert s.converter().overrides == []

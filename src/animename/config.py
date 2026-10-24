@@ -35,9 +35,9 @@ class Settings:
     public_url: str | None = None
     log_level: str = "INFO"
     upstream_timeout: float = 60.0
-    # Кэш ответов на поисковые запросы с q: после очистки "Title S2", "Title Season 2" и "Title"
-    # становятся одним запросом, и Prowlarr получает его один раз. 0 выключает кэш.
-    cache_ttl: float = 300.0
+    # Кэш ответов на поисковые запросы с q: после очистки "Title S2", "Title Season 2", "Title 05"
+    # и "Title" становятся одним запросом, и Prowlarr получает его один раз. 0 выключает кэш.
+    cache_ttl: float = 600.0
     cache_size: int = 256
     # Языки, на которых запросы уходят в Prowlarr; остальные сразу получают пустой RSS.
     # en включает ромадзи. "any" выключает фильтр.

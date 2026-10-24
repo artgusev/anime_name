@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import dataclass, replace
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,9 +24,10 @@ HOP_BY_HOP = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailers", "transfer-encoding", "upgrade",
 }
-SKIP_REQUEST_HEADERS = HOP_BY_HOP | {"host", "accept-encoding", "content-length"}
+SKIP_REQUEST_HEADERS = HOP_BY_HOP | {"host", "accept-encoding", "content-length", "user-agent"}
 SKIP_RESPONSE_HEADERS = HOP_BY_HOP | {"content-length", "content-encoding"}
 CACHE_HEADER = "X-Animename-Cache"
+CACHE_KEY_IGNORE = frozenset({"t", "apikey"})
 SKIP_HEADER = "X-Animename-Skip"
 RSS_CONTENT_TYPE = "application/rss+xml; charset=utf-8"
 
@@ -40,6 +42,36 @@ class Response:
         return replace(self, headers=self.headers + ((name, value),))
 
 
+class Stats:
+    """Счётчики для /health: видно, доходит ли трафик Sonarr до прокси вообще."""
+
+    FIELDS = ("requests", "forwarded", "skipped", "cache_hits")
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._counts = dict.fromkeys(self.FIELDS, 0)
+
+    def bump(self, name: str) -> None:
+        with self._lock:
+            self._counts[name] += 1
+
+    def snapshot(self) -> dict[str, int]:
+        with self._lock:
+            return dict(self._counts)
+
+
+def proxy_user_agent(headers: dict[str, str]) -> str:
+    """``animename/0.1.0 (via Sonarr 4.0.1 (docker))``.
+
+    Prowlarr берёт имя источника из User-Agent до первого ``/``, поэтому в его истории
+    запросы через прокси подписаны ``animename``, а прямые остаются ``Sonarr``. Слэши
+    из исходного агента убираются, чтобы Prowlarr не споткнулся о второй ``/``.
+    """
+    original = next((v for k, v in headers.items() if k.lower() == "user-agent"), "")
+    original = " ".join(original.replace("/", " ").split()) or "unknown"
+    return f"animename/{__version__} (via {original})"
+
+
 class ProxyApp:
     """Логика проксирования без привязки к серверу: удобно тестировать."""
 
@@ -51,16 +83,19 @@ class ProxyApp:
         )
         self.cache: TTLCache[tuple, Response] = TTLCache(settings.cache_ttl, settings.cache_size)
         self.query_filter = settings.query_filter()
+        self.stats = Stats()
 
     def handle_get(self, raw_path: str, headers: dict[str, str]) -> Response:
         parts = urlsplit(raw_path)
         if parts.path in ("/", "/health", "/healthz"):
             body = json.dumps(
                 {"status": "ok", "service": "animename", "version": __version__,
-                 "upstream": self.settings.upstream_url, "cache_entries": len(self.cache)}
+                 "upstream": self.settings.upstream_url, "cache_entries": len(self.cache),
+                 "stats": self.stats.snapshot()}
             ).encode()
             return Response(200, (("Content-Type", "application/json"),), body)
 
+        self.stats.bump("requests")
         is_api = parts.path.endswith("/api")
         query = parts.query
         search_type = query_type(query) if is_api else ""
@@ -74,6 +109,7 @@ class ProxyApp:
         reason = self.query_filter.reason(q) if q else None
         if reason:
             log.info("skip: %r (%s)", q, reason)
+            self.stats.bump("skipped")
             return Response(
                 200,
                 (("Content-Type", RSS_CONTENT_TYPE), (CACHE_HEADER, "SKIP"), (SKIP_HEADER, reason)),
@@ -81,23 +117,37 @@ class ProxyApp:
             )
 
         if is_search and q and self.cache.enabled:
-            # Ключ: индексер (путь) и очищенные параметры. RSS без q не кэшируем, чтобы не задерживать новинки.
-            key = (parts.path, tuple(sorted(parse_qsl(query, keep_blank_values=True))))
+            # Ключ: индексер (путь) и очищенные параметры без t и apikey. Поиск сезона (tvsearch)
+            # и поиск серий (search) после очистки дают RuTracker один и тот же запрос.
+            # RSS без q не кэшируем, чтобы не задерживать новинки.
+            key = (parts.path, tuple(sorted(
+                (k, v) for k, v in parse_qsl(query, keep_blank_values=True) if k not in CACHE_KEY_IGNORE
+            )))
             response, hit = self.cache.get_or_fetch(
                 key,
-                lambda: self._fetch(parts.path, query, headers, is_search),
+                lambda: self._fetch(parts.path, query, headers, search_type),
                 should_cache=lambda r: r.status == 200,
             )
             if hit:
-                log.debug("cache hit: %s?%s", parts.path, query)
+                log.info("cache: %r (%s)", q, search_type)
+                self.stats.bump("cache_hits")
             return response.with_header(CACHE_HEADER, "HIT" if hit else "MISS")
 
-        return self._fetch(parts.path, query, headers, is_search)
+        return self._fetch(parts.path, query, headers, search_type if is_search else "")
 
-    def _fetch(self, path: str, query: str, headers: dict[str, str], is_search: bool) -> Response:
+    def _fetch(self, path: str, query: str, headers: dict[str, str], search_type: str) -> Response:
+        is_search = search_type in SEARCH_TYPES
+        if is_search:
+            q = query_param(query, "q")
+            self.stats.bump("forwarded")
+            if q:
+                log.info("forward: %r (%s)", q, search_type)
+            else:
+                log.debug("forward: rss (%s)", search_type)
+
         url = self.settings.upstream_url + path + (f"?{query}" if query else "")
         fwd_headers = {k: v for k, v in headers.items() if k.lower() not in SKIP_REQUEST_HEADERS}
-        fwd_headers.setdefault("User-Agent", f"animename/{__version__}")
+        fwd_headers["User-Agent"] = proxy_user_agent(headers)
 
         try:
             with urlopen(Request(url, headers=fwd_headers), timeout=self.settings.upstream_timeout) as resp:

@@ -7,9 +7,10 @@ from urllib.request import Request, urlopen
 
 import pytest
 
+from animename import __version__
 from animename.config import Settings
 from animename.render import Converter
-from animename.server import make_server
+from animename.server import make_server, proxy_user_agent
 
 CAPS = b'<?xml version="1.0"?><caps><server title="Prowlarr"/></caps>'
 FEED = """<?xml version="1.0" encoding="utf-8"?>
@@ -96,6 +97,29 @@ def test_health(proxy):
     assert b'"status": "ok"' in body
 
 
+def test_health_counters(proxy):
+    import json
+
+    get(proxy + "/1/api?t=search&q=Ataque+a+los+Titanes+31&apikey=KEY")   # skip
+    get(proxy + "/1/api?t=search&q=Attack+on+Titan+31&apikey=KEY")         # forward
+    get(proxy + "/1/api?t=search&q=Attack+on+Titan+32&apikey=KEY")         # cache hit
+    get(proxy + "/1/api?t=caps&apikey=KEY")                                # просто запрос
+    stats = json.loads(get(proxy + "/health")[2])["stats"]
+    assert stats == {"requests": 4, "forwarded": 1, "skipped": 1, "cache_hits": 1}
+
+
+@pytest.mark.parametrize(
+    "ua, expected",
+    [
+        ("Sonarr/4.0.1.929 (docker)", f"animename/{__version__} (via Sonarr 4.0.1.929 (docker))"),
+        ("", f"animename/{__version__} (via unknown)"),
+    ],
+)
+def test_proxy_user_agent(ua, expected):
+    headers = {"user-agent": ua} if ua else {}
+    assert proxy_user_agent(headers) == expected
+
+
 def test_caps_pass_through(proxy):
     status, headers, body = get(proxy + "/1/api?t=caps&apikey=KEY")
     assert status == 200
@@ -121,7 +145,9 @@ def test_search_rewrites_titles_and_query(proxy, upstream):
     assert params == {"t": "search", "q": "Shingeki no Kyojin", "cat": "5070", "apikey": "KEY", "limit": "100"}
     # gzip от Sonarr не пробрасываем: тело должно прийти несжатым, чтобы его переписать
     assert req_headers.get("Accept-Encoding", "identity") == "identity"
-    assert req_headers["User-Agent"] == "Sonarr/4.0"
+    # Prowlarr покажет источник "animename": до первого "/" и без второго слэша
+    assert req_headers["User-Agent"] == f"animename/{__version__} (via Sonarr 4.0)"
+    assert req_headers["User-Agent"].count("/") == 1
 
 
 def test_tvsearch_drops_season_and_ep(proxy):
@@ -172,6 +198,20 @@ def test_cache_dedups_query_variants(proxy):
         seen.append(headers["X-Animename-Cache"])
     assert seen == ["MISS", "HIT", "HIT"]
     assert api_calls() == [{"t": "tvsearch", "q": "Attack on Titan", "cat": "5070", "apikey": "KEY"}]
+
+
+def test_cache_merges_season_and_episode_searches(proxy):
+    # поиск сезона (tvsearch) и серий 1..3 (search) -> один запрос в Prowlarr
+    get(proxy + "/1/api?t=tvsearch&q=Attack+on+Titan&season=1&cat=5070&apikey=KEY&limit=100&offset=0")
+    seen = []
+    for ep in (1, 2, 3):
+        _, headers, _ = get(proxy + f"/1/api?t=search&q=Attack+on+Titan+{ep:02d}&cat=5070&apikey=KEY&limit=100&offset=0")
+        seen.append(headers["X-Animename-Cache"])
+    assert seen == ["HIT", "HIT", "HIT"]
+    assert len(api_calls()) == 1
+    # другая категория -> другой ключ
+    get(proxy + "/1/api?t=search&q=Attack+on+Titan+01&cat=5000&apikey=KEY&limit=100&offset=0")
+    assert len(api_calls()) == 2
 
 
 def test_cache_separates_pages_and_skips_rss(proxy):
