@@ -21,12 +21,17 @@ from animename.langfilter import QueryFilter, detect_language, parse_languages
         ("El Hazard: The Magnificent World", "en"),
         ("NCIS: Los Angeles", "en"),
         ("Fear the Walking Dead", "en"),
+        ("No Game No Life", "en"),
+        ("That Time I Got Reincarnated as a Slime", "en"),
         # русский
         ("Атака титанов", "ru"),
         ("Клинок, рассекающий демонов", "ru"),
         # романские и германские
         ("Ataque de los Titanes", "es"),
+        ("Ataque a los Titanes", "es"),
+        ("Ataque a los Titanes 2013", "es"),
         ("Guardianes de la Noche", "es"),
+        ("No es la vida", "es"),
         ("LAttaque des Titans", "fr"),
         ("Les Aventures de Tintin", "fr"),
         ("Attacco dei Giganti", "it"),

@@ -37,10 +37,11 @@ CYRILLIC_MARKERS = {
     "kk": set("әғқңөұүһ"),
 }
 
-# Английские служебные слова. "no" и "to" заодно поддерживают ромадзи.
+# Английские служебные слова. Без "a" и "no": они же испанские ("Ataque a los Titanes"),
+# и один такой артикль уравновешивал бы настоящий испанский маркер.
 EN_WORDS = frozenset(
     "the of and in on at to for with from by my your his her our their this that is are was "
-    "be or not no it its as an a into over under up down out about after before who what "
+    "be or not it its as an into over under up down out about after before who what "
     "when where why how".split()
 )
 

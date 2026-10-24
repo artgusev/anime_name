@@ -30,6 +30,9 @@ TRAILING_EP_RE = re.compile(
 )
 # Для аниме Sonarr шлёт "Title 05": абсолютный номер серии, минимум две цифры.
 TRAILING_NUM_RE = re.compile(r"\s+\d{2,4}\s*$")
+# Sonarr добавляет к части алиасов год: "Attack on Titan 2013". Год отрезается, только если
+# перед ним хотя бы два слова, чтобы не трогать названия вроде "Space 1999".
+TRAILING_YEAR_RE = re.compile(r"^(?P<head>\S+(?:\s+\S+)+?)\s+(?:19|20)\d{2}\s*$")
 
 EMPTY_FEED_TEMPLATE = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -65,10 +68,11 @@ def query_param(query: str, name: str) -> str | None:
 
 def clean_query(q: str, *, search_type: str) -> str:
     q = " ".join(q.split())
-    # Номер серии Sonarr дописывает последним, поэтому сначала он, потом S02/Season 2.
+    # Номер серии Sonarr дописывает последним, поэтому сначала он, потом S02/Season 2, потом год.
     if search_type == "search":
         q = TRAILING_NUM_RE.sub("", q)
     q = TRAILING_EP_RE.sub("", q)
+    q = TRAILING_YEAR_RE.sub(r"\g<head>", q)
     return q.strip()
 
 

@@ -57,6 +57,16 @@ FEED = """<?xml version="1.0" encoding="utf-8"?>
         ("t=tvsearch&q=Title.S01E05", "Title", False),
         # год в скобках не сезон
         ("t=search&q=Hunter+x+Hunter+(2011)+05", "Hunter x Hunter (2011)", False),
+        # год, который Sonarr дописывает к алиасу, отрезается
+        ("t=search&q=Ataque+a+los+Titanes+2013+37", "Ataque a los Titanes", False),
+        ("t=search&q=Attack+on+Titan+2013+37", "Attack on Titan", False),
+        ("t=tvsearch&q=Attack+on+Titan+2013", "Attack on Titan", False),
+        ("t=tvsearch&q=Attack+on+Titan+2013+S02", "Attack on Titan", False),
+        ("t=search&q=Mob+Psycho+100+2016+07", "Mob Psycho 100", False),
+        # одно слово перед годом: год остаётся
+        ("t=search&q=Space+1999+05", "Space 1999", False),
+        ("t=tvsearch&q=Yellowstone+2018", "Yellowstone 2018", False),
+        ("t=search&q=1983+05", "1983", False),
     ],
 )
 def test_rewrite_query_cleans_title(query, expected_q, expect_season):
@@ -93,7 +103,10 @@ def test_clean_query_tvsearch_keeps_trailing_number():
 
 
 def test_clean_query_collapses_variants():
-    variants = ["Attack on Titan S2", "Attack on Titan Season 2", "Attack on Titan (Season 2)", "Attack on Titan"]
+    variants = [
+        "Attack on Titan S2", "Attack on Titan Season 2", "Attack on Titan (Season 2)",
+        "Attack on Titan 2013", "Attack on Titan 2013 S02", "Attack on Titan",
+    ]
     assert {clean_query(v, search_type="tvsearch") for v in variants} == {"Attack on Titan"}
 
 

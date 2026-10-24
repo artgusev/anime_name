@@ -250,6 +250,16 @@ def test_language_filter_default(proxy):
     assert [p["q"] for p in api_calls()] == ["Attack on Titan", "Shingeki no Kyojin", "Атака титанов"]
 
 
+def test_language_filter_spanish_alias_with_year(proxy):
+    # ровно тот запрос, что Sonarr шлёт для испанского алиаса с TVDB
+    _, headers, _ = get(proxy + "/1/api?t=search&q=Ataque+a+los+Titanes+2013+37&cat=5070&apikey=KEY")
+    assert headers["X-Animename-Skip"] == "language=es not in en,ru"
+    assert api_calls() == []
+    # английский вариант с годом уходит без года и без номера серии
+    get(proxy + "/1/api?t=search&q=Attack+on+Titan+2013+37&cat=5070&apikey=KEY")
+    assert [p["q"] for p in api_calls()] == ["Attack on Titan"]
+
+
 def test_language_filter_disabled_and_allow(upstream):
     server, url = make_proxy(upstream, query_languages="any")
     try:
