@@ -74,12 +74,18 @@ def test_settings_from_env(tmp_path):
             "CACHE_TTL": "600",
             "CACHE_SIZE": "32",
             "QUERY_SKIP": "Ataque|Attaque",
+            "QUERY_ALLOW": "Chevalier",
+            "QUERY_LANGUAGES": "ru",
         }
     )
     assert s.upstream_url == "http://prowlarr:9696"
     assert s.public_url == "http://animename:8080"
     assert (s.listen_port, s.max_episodes, s.forward_season) == (9000, 50, True)
     assert (s.cache_ttl, s.cache_size, s.query_skip) == (600.0, 32, "Ataque|Attaque")
+    qf = s.query_filter()
+    assert qf.languages == frozenset({"ru"})
+    assert qf.reason("Attack on Titan") == "language=en not in ru"
+    assert qf.reason("Le Chevalier DEon") is None
     conv = s.converter()
     assert conv.options == RenderOptions(pack_style="range", max_episodes=50, release_group="RuTracker")
     assert len(conv.overrides) == 1
@@ -90,4 +96,6 @@ def test_settings_defaults():
     assert s.upstream_url == "http://prowlarr:9696"
     assert s.listen_port == 8080
     assert (s.cache_ttl, s.cache_size, s.query_skip) == (300.0, 256, "")
+    assert s.query_languages == "ru,en"
+    assert s.query_filter().languages == frozenset({"ru", "en"})
     assert s.converter().overrides == []

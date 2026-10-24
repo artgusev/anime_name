@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass, replace
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,6 +26,7 @@ HOP_BY_HOP = {
 SKIP_REQUEST_HEADERS = HOP_BY_HOP | {"host", "accept-encoding", "content-length"}
 SKIP_RESPONSE_HEADERS = HOP_BY_HOP | {"content-length", "content-encoding"}
 CACHE_HEADER = "X-Animename-Cache"
+SKIP_HEADER = "X-Animename-Skip"
 RSS_CONTENT_TYPE = "application/rss+xml; charset=utf-8"
 
 
@@ -50,10 +50,7 @@ class ProxyApp:
             (settings.upstream_url, settings.public_url) if settings.public_url else None
         )
         self.cache: TTLCache[tuple, Response] = TTLCache(settings.cache_ttl, settings.cache_size)
-        try:
-            self.query_skip = re.compile(settings.query_skip, re.IGNORECASE) if settings.query_skip else None
-        except re.error as exc:
-            raise ValueError(f"QUERY_SKIP: некорректное регулярное выражение {settings.query_skip!r}: {exc}") from exc
+        self.query_filter = settings.query_filter()
 
     def handle_get(self, raw_path: str, headers: dict[str, str]) -> Response:
         parts = urlsplit(raw_path)
@@ -74,11 +71,13 @@ class ProxyApp:
                 log.debug("query: %s -> %s", parts.query, query)
 
         q = query_param(query, "q") if is_search else None
-        if q and self.query_skip and self.query_skip.search(q):
-            log.info("skip: %r подпадает под QUERY_SKIP", q)
+        reason = self.query_filter.reason(q) if q else None
+        if reason:
+            log.info("skip: %r (%s)", q, reason)
             return Response(
-                200, (("Content-Type", RSS_CONTENT_TYPE), (CACHE_HEADER, "SKIP")),
-                empty_feed("skipped by QUERY_SKIP"),
+                200,
+                (("Content-Type", RSS_CONTENT_TYPE), (CACHE_HEADER, "SKIP"), (SKIP_HEADER, reason)),
+                empty_feed(f"no results: {reason}"),
             )
 
         if is_search and q and self.cache.enabled:
@@ -168,8 +167,11 @@ def serve(settings: Settings) -> None:
     log.info("animename %s: слушаю http://%s:%s, upstream %s", __version__, host, port, settings.upstream_url)
     if settings.cache_ttl > 0:
         log.info("кэш ответов: %.0f с, до %d записей", settings.cache_ttl, settings.cache_size)
+    log.info("языки запросов: %s", settings.query_languages or "any")
     if settings.query_skip:
         log.info("QUERY_SKIP: %s", settings.query_skip)
+    if settings.query_allow:
+        log.info("QUERY_ALLOW: %s", settings.query_allow)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

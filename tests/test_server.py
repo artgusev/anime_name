@@ -227,6 +227,50 @@ def test_query_skip_returns_empty_feed(upstream):
         server.server_close()
 
 
+def test_language_filter_default(proxy):
+    import xml.etree.ElementTree as ET
+
+    # испанский алиас с TVDB: пустой ответ, Prowlarr не вызывается
+    status, headers, body = get(proxy + "/1/api?t=search&q=Ataque+de+los+Titanes+05&apikey=KEY")
+    assert status == 200
+    assert headers["X-Animename-Cache"] == "SKIP"
+    assert headers["X-Animename-Skip"] == "language=es not in en,ru"
+    assert ET.fromstring(body).find("channel").findall("item") == []
+    assert api_calls() == []
+
+    # японский иероглифами и украинский тоже
+    get(proxy + "/1/api?t=search&q=%E9%80%B2%E6%92%83%E3%81%AE%E5%B7%A8%E4%BA%BA+05&apikey=KEY")
+    get(proxy + "/1/api?t=search&q=%D0%90%D1%82%D0%B0%D0%BA%D0%B0+%D1%82%D0%B8%D1%82%D0%B0%D0%BD%D1%96%D0%B2&apikey=KEY")
+    assert api_calls() == []
+
+    # английский, ромадзи и русский уходят в Prowlarr
+    for q in ("Attack+on+Titan+05", "Shingeki+no+Kyojin+05", "%D0%90%D1%82%D0%B0%D0%BA%D0%B0+%D1%82%D0%B8%D1%82%D0%B0%D0%BD%D0%BE%D0%B2"):
+        _, headers, _ = get(proxy + f"/1/api?t=search&q={q}&apikey=KEY")
+        assert headers["X-Animename-Cache"] == "MISS"
+    assert [p["q"] for p in api_calls()] == ["Attack on Titan", "Shingeki no Kyojin", "Атака титанов"]
+
+
+def test_language_filter_disabled_and_allow(upstream):
+    server, url = make_proxy(upstream, query_languages="any")
+    try:
+        get(url + "/1/api?t=search&q=Ataque+de+los+Titanes&apikey=KEY")
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert [p["q"] for p in api_calls()] == ["Ataque de los Titanes"]
+
+    FakeProwlarr.requests.clear()
+    server, url = make_proxy(upstream, query_allow="Chevalier")
+    try:
+        get(url + "/1/api?t=search&q=Le+Chevalier+DEon&apikey=KEY")
+        _, headers, _ = get(url + "/1/api?t=search&q=Les+Aventures+de+Tintin&apikey=KEY")
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert [p["q"] for p in api_calls()] == ["Le Chevalier DEon"]
+    assert headers["X-Animename-Skip"].startswith("language=fr")
+
+
 def test_invalid_query_skip_fails_fast(upstream):
     with pytest.raises(ValueError, match="QUERY_SKIP"):
         make_proxy(upstream, query_skip="(")

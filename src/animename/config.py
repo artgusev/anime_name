@@ -7,6 +7,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Mapping
 
+from .langfilter import QueryFilter
 from .render import Converter, Override, RenderOptions
 
 try:  # Python 3.11+
@@ -38,9 +39,13 @@ class Settings:
     # становятся одним запросом, и Prowlarr получает его один раз. 0 выключает кэш.
     cache_ttl: float = 300.0
     cache_size: int = 256
-    # Регулярное выражение (без учёта регистра): запросы с таким q сразу получают пустой RSS.
-    # Удобно отсекать альтернативные названия с TVDB на других языках: "Ataque|Attaque|attacco".
+    # Языки, на которых запросы уходят в Prowlarr; остальные сразу получают пустой RSS.
+    # en включает ромадзи. "any" выключает фильтр.
+    query_languages: str = "ru,en"
+    # Регулярное выражение (без учёта регистра): запросы с таким q всегда получают пустой RSS.
     query_skip: str = ""
+    # Регулярное выражение: запросы с таким q всегда уходят в Prowlarr, минуя фильтр языков.
+    query_allow: str = ""
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -75,6 +80,9 @@ class Settings:
     def converter(self) -> Converter:
         overrides = load_overrides(self.overrides_file) if self.overrides_file else []
         return Converter(options=self.render_options(), overrides=overrides, title_pick=self.title_pick)
+
+    def query_filter(self) -> QueryFilter:
+        return QueryFilter.build(self.query_languages, self.query_skip, self.query_allow)
 
 
 def load_overrides(path: str | os.PathLike[str]) -> list[Override]:

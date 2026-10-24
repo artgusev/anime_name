@@ -28,6 +28,21 @@ def test_convert_json(capsys):
     assert payload["release"]["complete"] is True
 
 
+def test_query_command(capsys):
+    assert main(["query", "Shingeki no Kyojin (Season 2) 05", "Ataque de los Titanes 05", "Атака титанов"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out == [
+        "'Shingeki no Kyojin (Season 2) 05' -> 'Shingeki no Kyojin' [en] forward",
+        "'Ataque de los Titanes 05' -> 'Ataque de los Titanes' [es] skip: language=es not in en,ru",
+        "'Атака титанов' -> 'Атака титанов' [ru] forward",
+    ]
+
+
+def test_query_command_options(capsys):
+    main(["query", "--type", "tvsearch", "--languages", "any", "--query-skip", "Titanes", "Ataque de los Titanes 05"])
+    assert capsys.readouterr().out.strip() == "'Ataque de los Titanes 05' -> 'Ataque de los Titanes 05' [es] skip: QUERY_SKIP"
+
+
 def test_convert_with_overrides_file(capsys, tmp_path):
     path = tmp_path / "o.toml"
     path.write_text('[[override]]\nmatch = "Shingeki"\ntitle = "Attack on Titan"\n', encoding="utf-8")

@@ -10,7 +10,9 @@ from dataclasses import asdict
 
 from . import __version__
 from .config import Settings, load_overrides
+from .langfilter import detect_language
 from .render import Converter
+from .torznab import clean_query
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,13 +32,23 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--title-pick", choices=["first", "last"])
     c.add_argument("--release-group", metavar="NAME")
 
+    qp = sub.add_parser("query", help="показать, что прокси сделает с поисковым запросом Sonarr")
+    qp.add_argument("queries", nargs="*", help="значения параметра q; без аргументов читается stdin")
+    qp.add_argument("--type", choices=["search", "tvsearch"], default="search", dest="search_type",
+                    help="тип запроса Torznab (влияет на обрезку номера серии)")
+    qp.add_argument("--languages", metavar="CODES", help="например ru,en или any")
+    qp.add_argument("--query-skip", metavar="REGEX")
+    qp.add_argument("--query-allow", metavar="REGEX")
+
     s = sub.add_parser("serve", help="запустить прокси (настройки из переменных окружения)")
     s.add_argument("--upstream", metavar="URL", help="адрес Prowlarr, например http://prowlarr:9696")
     s.add_argument("--host", metavar="HOST")
     s.add_argument("--port", type=int, metavar="PORT")
     s.add_argument("--overrides", metavar="FILE")
     s.add_argument("--cache-ttl", type=float, metavar="SECONDS", help="0 выключает кэш ответов")
+    s.add_argument("--languages", metavar="CODES", help="языки запросов, например ru,en или any")
     s.add_argument("--query-skip", metavar="REGEX", help="запросы с таким q получают пустой RSS")
+    s.add_argument("--query-allow", metavar="REGEX", help="запросы с таким q идут в Prowlarr всегда")
     s.add_argument("--log-level", metavar="LEVEL")
     return p
 
@@ -47,7 +59,8 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
         "overrides": "overrides_file", "pack_style": "pack_style", "max_episodes": "max_episodes",
         "title_pick": "title_pick", "release_group": "release_group", "upstream": "upstream_url",
         "host": "listen_host", "port": "listen_port", "log_level": "log_level",
-        "cache_ttl": "cache_ttl", "query_skip": "query_skip",
+        "cache_ttl": "cache_ttl", "query_skip": "query_skip", "query_allow": "query_allow",
+        "languages": "query_languages",
     }
     for arg, attr in mapping.items():
         value = getattr(args, arg, None)
@@ -80,6 +93,21 @@ def cmd_convert(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_query(args: argparse.Namespace) -> int:
+    settings = settings_from_args(args)
+    query_filter = settings.query_filter()
+    queries = args.queries or [line.rstrip("\n") for line in sys.stdin]
+    for raw in queries:
+        if not raw.strip():
+            continue
+        cleaned = clean_query(raw, search_type=args.search_type)
+        lang = detect_language(cleaned)
+        reason = query_filter.reason(cleaned) if cleaned else None
+        verdict = f"skip: {reason}" if reason else "forward"
+        print(f"{raw!r} -> {cleaned!r} [{lang}] {verdict}")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     settings = settings_from_args(args)
     logging.basicConfig(
@@ -96,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "convert":
         return cmd_convert(args)
+    if args.command == "query":
+        return cmd_query(args)
     return cmd_serve(args)
 
 
