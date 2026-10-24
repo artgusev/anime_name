@@ -1,0 +1,18 @@
+# Пример: добавьте сервис animename в compose рядом с prowlarr и sonarr.
+# Контейнер должен видеть Prowlarr по имени сервиса (общая сеть compose).
+services:
+  animename:
+    build: .
+    container_name: animename
+    environment:
+      UPSTREAM_URL: http://prowlarr:9696
+      OVERRIDES_FILE: /config/overrides.toml   # уберите, если файл не нужен
+      PACK_STYLE: season                        # season | range
+      MAX_EPISODES: "100"
+      LOG_LEVEL: INFO                           # DEBUG покажет и нераспознанные заголовки
+    volumes:
+      - ./config:/config:ro
+    # Порт наружу нужен только для отладки: Sonarr ходит по внутренней сети.
+    # ports:
+    #   - "8080:8080"
+    restart: unless-stopped
