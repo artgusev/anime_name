@@ -134,6 +134,99 @@ def test_pass_through(raw):
     assert convert(raw) is None
 
 
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # Strip Russian letters + Add RUS: кириллица выкинута, (ТВ-2) стало (S2), [12 из 12] стало E12 of 12
+        (
+            "(S2) / Shingeki no Kyojin Season 2 / Attack on Titan 2nd Season [TV] E12 of 12 "
+            "[2017, BDRip 1080p, 60 FPS] AniLibria RUS",
+            "Shingeki no Kyojin S02 [BDRip 1080p]",
+        ),
+        (
+            "(S1) / Shingeki no Kyojin / Attack on Titan [TV] E25 of 25 [2013, BDRip 1080p, 60 FPS] AniDUB RUS",
+            "Shingeki no Kyojin S01 [BDRip 1080p]",
+        ),
+        (
+            "(S3) / Shingeki no Kyojin Season 3 / Attack on Titan 3rd Season [TV] E22 of 22 "
+            "[2018, 2019, BDRip 1080p, 60 FPS] RUS",
+            "Shingeki no Kyojin S03 [BDRip 1080p]",
+        ),
+        # (ТВ-4, часть 2) -> (S4, 2)
+        (
+            "(S4, 2) / Shingeki no Kyojin: The Final Season / Attack on Titan: 4th Season Part 2 [TV] E12 of 12 "
+            "[2023, WEB-DL 1080p] RUS",
+            "Shingeki no Kyojin: The Final Season S04 [WEB-DL 1080p]",
+        ),
+        # без Strip: S/E-замены Prowlarr есть всегда, кириллица на месте
+        (
+            "Атака Титанов (S2) / Shingeki no Kyojin Season 2 / Attack on Titan 2nd Season [TV] E12 of 12 "
+            "[2017, приключения, триллер, фантастика, BDRip 1080p, 60 FPS] AniLibria",
+            "Shingeki no Kyojin S02 [BDRip 1080p]",
+        ),
+        # онгоинг в форме Prowlarr
+        (
+            "Фрирен / Sousou no Frieren [TV] E17 of 28 [2023, WEB-DL] [1080p]",
+            "Sousou no Frieren S01E01-E17 [WEB-DL 1080p]",
+        ),
+        ("Dandadan [TV] E1 of 12 [2024, WEB-DL 1080p] RUS", "Dandadan S01E01 [WEB-DL 1080p]"),
+        # диапазон после Strip: "из" выкинуто
+        (
+            "Shingeki no Kyojin / Attack on Titan [TV] [1-25 25] [2013, BDRip] [1080p] RUS",
+            "Shingeki no Kyojin S01 [BDRip 1080p]",
+        ),
+        ("Sousou no Frieren [TV] [1-17 28] [2023, WEB-DL] [1080p]", "Sousou no Frieren S01E01-E17 [WEB-DL 1080p]"),
+        ("Shingeki no Kyojin [TV-3] [13-22 22] [2019, BDRip] [1080p]", "Shingeki no Kyojin S03E13-E22 [BDRip 1080p]"),
+        # [ТВ-1] -> [S1], скобки [TV] нет
+        (
+            "Shingeki no Kyojin / Attack on Titan [S1] E25 of 25 [2013, BDRip 1080p] RUS",
+            "Shingeki no Kyojin S01 [BDRip 1080p]",
+        ),
+        # (S2) внутри латинской части
+        ("Shingeki no Kyojin (S2) / Attack on Titan [TV] E12 of 12 [2017, BDRip 1080p]", "Shingeki no Kyojin S02 [BDRip 1080p]"),
+        # обычные сериалы после Prowlarr
+        ("Twin Peaks S1E1-8 of 8 [1990, BDRip 1080p] RUS", "Twin Peaks S01 [BDRip 1080p]"),
+        (
+            "Stranger Things S4E1-7 of 9 [2022, WEB-DL 2160p HEVC HDR] RUS",
+            "Stranger Things S04E01-E07 [WEB-DL 2160p x265]",
+        ),
+        ("Twin Peaks S2 E1-10 [1990, BDRip 1080p] RUS", "Twin Peaks S02E01-E10 [BDRip 1080p]"),
+        # теги перенесены в конец (Move all tags to end)
+        (
+            "Shingeki no Kyojin Season 2 / Attack on Titan 2nd Season E12 of 12 [2017, BDRip 1080p] [TV]",
+            "Shingeki no Kyojin S02 [BDRip 1080p]",
+        ),
+    ],
+)
+def test_prowlarr_processed_titles(raw, expected):
+    assert convert(raw) == expected
+
+
+def test_prowlarr_open_ended_long_runner():
+    rel = parse_title("One Piece [TV] [1-1122 >1122] [1999, WEBRip] [1080p] RUS")
+    assert rel.open_ended and rel.episode_count == 1122
+    assert render(rel, SEASON) is None
+
+
+def test_prowlarr_part_is_recorded():
+    rel = parse_title("(S4, 2) / Shingeki no Kyojin: The Final Season [TV] E12 of 12 [2023, WEB-DL 1080p] RUS")
+    assert (rel.season, rel.part, rel.first, rel.last) == (4, 2, 1, 12)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # фильм после Prowlarr: только год и качество, без серий
+        "Kimi no Na wa [2016, BDRip 1080p] RUS",
+        "Shingeki no Kyojin: The Last Attack / Attack on Titan: The Last Attack [Movie] [2024, BDRip] RUS",
+        # оставшийся от шапки один маркер сезона без названия
+        "(S2) [TV] E12 of 12 [2017, BDRip 1080p] RUS",
+    ],
+)
+def test_prowlarr_pass_through(raw):
+    assert convert(raw) is None
+
+
 def test_long_runner_is_not_rewritten_by_default():
     raw = "Ван-Пис / One Piece [TV] [1-1122 из >1122] [RUS(int), JAP+Sub] [1999, приключения, WEBRip] [1080p]"
     rel = parse_title(raw)

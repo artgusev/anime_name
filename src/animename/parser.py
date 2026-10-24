@@ -1,11 +1,16 @@
 """Разбор заголовков раздач RuTracker в структуру Release.
 
-Поддерживаются два формата заголовков:
+Поддерживаются три формы заголовков:
 
-* аниме-разделы:
+* аниме-разделы как на сайте:
   ``Атака титанов / Shingeki no Kyojin [TV-1] [1-25 из 25] [RUS(int), JAP+Sub] [2013, ..., BDRip] [1080p]``
-* обычные сериалы:
+* обычные сериалы как на сайте:
   ``Твин Пикс / Twin Peaks / Сезон: 1 / Серии: 1-8 из 8 (Дэвид Линч) [1990, США, BDRip 1080p]``
+* то, что отдаёт индексер RuTracker в Prowlarr. Его парсер для TV-категорий всегда
+  переписывает ``(ТВ-2)`` в ``(S2)``, ``[12 из 12]`` в ``E12 of 12`` и ``Сезон: 1 / Серии: 1-8 из 8``
+  в ``S1E1-8 of 8``, а с опцией Strip Russian letters ещё и выкидывает кириллицу: ``[1-25 из 25]``
+  становится ``[1-25 25]``, ``[ТВ]`` исчезает совсем, ``(ТВ-4, часть 2)`` превращается в ``(S4, 2)``:
+  ``(S2) / Shingeki no Kyojin Season 2 / Attack on Titan 2nd Season [TV] E12 of 12 [2017, BDRip 1080p, 60 FPS] AniLibria RUS``
 
 Всё, что не распознано, возвращается как ``None`` и проксируется без изменений.
 """
@@ -25,6 +30,8 @@ TYPE_RE = re.compile(
     r"(?:\s*[-–]?\s*(?P<num>\d{1,2})(?!\d))?(?P<rest>[^\]]*)\]",
     re.IGNORECASE,
 )
+# [ТВ-1] после Prowlarr: [S1]
+PROWLARR_TYPE_RE = re.compile(r"\[\s*S(?P<num>\d{1,2})\s*\]")
 KIND_MAP = {
     "tv": "TV", "тв": "TV",
     "movie": "Movie", "фильм": "Movie", "film": "Movie",
@@ -34,17 +41,41 @@ KIND_MAP = {
     "music": "Music", "clip": "Music",
 }
 
-# [1-25 из 25], [25 из 25], [01-13 из 13], [1-1122 из >1122], [12 из 12 + Special], [1-12 of 12]
-_EP_CORE = (
-    r"(?P<a>\d{1,4})(?:\s*[-–—]\s*(?P<b>\d{1,4}))?"
-    r"\s*(?:из|of)\s*(?P<open>[>+~]\s*)?(?P<total>\d{1,4}|\?+|x+|х+)?(?P<plus>\+)?"
+# (ТВ-2), (S2), [S1], (S4, 2) в шапке: номер сезона и, возможно, часть
+HEAD_SEASON_RE = re.compile(
+    r"[(\[]\s*(?:S|ТВ\s*-?\s*)(?P<n>\d{1,2})(?P<rest>[^)\]]*)[)\]]", re.IGNORECASE
 )
+# Сезон без серий после Prowlarr: "Сезон: 3" -> "S3" отдельным словом. Не внутри скобок:
+# "(S2)" и "[S1]" разбирают HEAD_SEASON_RE и PROWLARR_TYPE_RE.
+STANDALONE_SEASON_RE = re.compile(r"(?<![A-Za-z0-9(\[])S(?P<n>\d{1,2})(?![A-Za-z0-9)\]])")
+
+# [1-25 из 25], [25 из 25], [01-13 из 13], [1-1122 из >1122], [12 из 12 + Special], [1-12 of 12]
+_TOTAL = r"(?P<open>[>+~]\s*)?(?P<total>\d{1,4}(?:\+\d{1,3})?|\?+|x+|х+)?(?P<plus>\+)?"
+_EP_CORE = r"(?P<a>\d{1,4})(?:\+\d{1,3})?(?:\s*[-–—]\s*(?P<b>\d{1,4}))?\s*(?:из|of)\s*" + _TOTAL
 EP_BRACKET_RE = re.compile(
     r"\[\s*(?:(?:eps?\.?|episodes?|серии|серия)\s*:?\s*)?" + _EP_CORE + r"[^\]]*\]",
     re.IGNORECASE,
 )
 EP_PLAIN_RE = re.compile(r"(?:Серии|Серия|Episodes?)\s*:?\s*" + _EP_CORE, re.IGNORECASE)
 SEASON_PLAIN_RE = re.compile(r"(?:Сезон|Season)\s*:\s*(?P<n>\d{1,2})", re.IGNORECASE)
+# Формы Prowlarr: "S1E1-8 of 8", "S1E1-8", "E12 of 12", "E13-22 of 22", "E1-8"
+PROWLARR_SE_RE = re.compile(
+    r"(?<![A-Za-z0-9])S(?P<s>\d{1,2})E(?P<a>\d{1,4})(?:-(?P<b>\d{1,4}))?(?:\s+of\s+" + _TOTAL + r")?(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+PROWLARR_E_RE = re.compile(
+    r"(?<![A-Za-z0-9])E(?P<a>\d{1,4})(?:\+\d{1,3})?(?:-(?P<b>\d{1,4}))?\s+of\s+"
+    r"(?P<open>[>+~]\s*)?(?P<total>\d{1,4}(?:\+\d{1,3})?|\?+|x+|х+|\w)(?P<plus>\+)?(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+PROWLARR_E_RANGE_RE = re.compile(r"(?<![A-Za-z0-9])E(?P<a>\d{1,4})-(?P<b>\d{1,4})(?![A-Za-z0-9])", re.IGNORECASE)
+# [1-25 из 25] после Strip Russian letters: [1-25 25]
+STRIPPED_EP_BRACKET_RE = re.compile(
+    r"\[\s*(?P<a>\d{1,4})\s*[-–—]\s*(?P<b>\d{1,4})\s+(?P<open>[>+~]\s*)?(?P<total>\d{1,4})(?P<plus>\+)?\s*\]"
+)
+EPISODE_RES = (EP_BRACKET_RE, EP_PLAIN_RE, PROWLARR_SE_RE, PROWLARR_E_RE, PROWLARR_E_RANGE_RE, STRIPPED_EP_BRACKET_RE)
+# [2017, ...] — скобка с годом и качеством; нужна только чтобы не считать её частью названия
+YEAR_BRACKET_RE = re.compile(r"\[\s*(?:19|20)\d{2}(?![\d])")
 
 # Источник видео -> токен, который Sonarr уверенно распознаёт.
 SOURCE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -102,7 +133,7 @@ class Release:
 
     @property
     def complete(self) -> bool:
-        """Раздача содержит все серии (``[1-25 из 25]``, ``[25 из 25]``)."""
+        """Раздача содержит все серии (``[1-25 из 25]``, ``[25 из 25]``, ``E12 of 12``)."""
         if self.last is None or self.total is None or self.open_ended:
             return False
         return self.last >= self.total
@@ -114,6 +145,15 @@ class Release:
         return self.last - self.first + 1
 
 
+@dataclass
+class _Episodes:
+    first: int | None = None
+    last: int | None = None
+    total: int | None = None
+    open_ended: bool = False
+    season: int | None = None
+
+
 def parse_title(raw: str, *, title_pick: str = "first") -> Release | None:
     """Разобрать заголовок RuTracker. ``title_pick`` выбирает латинскую часть: ``first`` или ``last``."""
     text = " ".join(raw.split())
@@ -121,23 +161,36 @@ def parse_title(raw: str, *, title_pick: str = "first") -> Release | None:
         return None
 
     type_match = TYPE_RE.search(text)
+    prowlarr_type = None if type_match else PROWLARR_TYPE_RE.search(text)
+    season_plain = SEASON_PLAIN_RE.search(text)
+    standalone_season = STANDALONE_SEASON_RE.search(text)
+    episode_matches = [m for m in (rx.search(text) for rx in EPISODE_RES) if m]
+    year_bracket = YEAR_BRACKET_RE.search(text)
+
+    markers = [
+        m for m in (type_match, prowlarr_type, season_plain, standalone_season, year_bracket, *episode_matches) if m
+    ]
+    if not markers:
+        return None
+    cut = min(m.start() for m in markers)
+    head, tail = text[:cut], text[cut:]
+
+    bracket_season: int | None = None
+    part: int | None = None
     if type_match:
-        head = text[: type_match.start()]
-        tail = text[type_match.start():]
         kind = KIND_MAP[type_match.group("kind").lower()]
         bracket_season = int(type_match.group("num")) if type_match.group("num") else None
         part = _find_part(type_match.group("rest"))
-    else:
-        season_match = SEASON_PLAIN_RE.search(text)
-        ep_match = EP_PLAIN_RE.search(text)
-        if not season_match and not ep_match:
-            return None
-        cut = min(m.start() for m in (season_match, ep_match) if m)
-        head, tail = text[:cut], text[cut:]
+    elif prowlarr_type:
         kind = "TV"
-        bracket_season = int(season_match.group("n")) if season_match else None
-        part = None
+        bracket_season = int(prowlarr_type.group("num"))
+    elif episode_matches or season_plain or standalone_season:
+        kind = "TV"
+    else:
+        # только год и качество: скорее всего фильм, не трогаем
+        return None
 
+    head_season, head_part = _head_season(head)
     latin = _latin_parts(head)
     if not latin:
         return None
@@ -145,29 +198,26 @@ def parse_title(raw: str, *, title_pick: str = "first") -> Release | None:
     if not title:
         return None
 
-    first = last = total = None
-    open_ended = False
-    ep = EP_BRACKET_RE.search(tail) or EP_PLAIN_RE.search(tail)
-    if ep:
-        a = int(ep.group("a"))
-        b = int(ep.group("b")) if ep.group("b") else None
-        first, last = (a, b) if b is not None else (1, a)
-        if first > last:
-            first, last = last, first
-        total_text = ep.group("total")
-        total = int(total_text) if total_text and total_text.isdigit() else None
-        open_ended = bool(ep.group("open") or ep.group("plus"))
+    eps = _parse_episodes(tail)
+    season = _first_not_none(
+        bracket_season,
+        head_season,
+        title_season,
+        eps.season,
+        int(season_plain.group("n")) if season_plain else None,
+        int(standalone_season.group("n")) if standalone_season else None,
+    )
 
     return Release(
         raw=raw,
         title=title,
         kind=kind,
-        season=bracket_season if bracket_season is not None else title_season,
-        first=first,
-        last=last,
-        total=total,
-        open_ended=open_ended,
-        part=part if part is not None else title_part,
+        season=season,
+        first=eps.first,
+        last=eps.last,
+        total=eps.total,
+        open_ended=eps.open_ended,
+        part=_first_not_none(part, head_part, title_part),
         source=_find_source(tail),
         resolution=_find_resolution(tail),
         codec=_find_codec(tail),
@@ -176,8 +226,24 @@ def parse_title(raw: str, *, title_pick: str = "first") -> Release | None:
     )
 
 
+def _first_not_none(*values: int | None) -> int | None:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _head_season(head: str) -> tuple[int | None, int | None]:
+    m = HEAD_SEASON_RE.search(head)
+    if not m:
+        return None, None
+    rest = m.group("rest")
+    part_match = PART_RE.search(rest) or re.search(r",\s*(?P<n>\d{1,2})\s*$", rest)
+    return int(m.group("n")), int(part_match.group("n")) if part_match else None
+
+
 def _latin_parts(head: str) -> list[str]:
-    head = head.strip()
+    head = HEAD_SEASON_RE.sub(" ", head).strip()
     for _ in range(3):
         stripped = TRAILING_PAREN_RE.sub("", head)
         if stripped == head:
@@ -226,6 +292,29 @@ def _find_part(rest: str | None) -> int | None:
         return None
     m = PART_RE.search(rest)
     return int(m.group("n")) if m else None
+
+
+def _parse_episodes(tail: str) -> _Episodes:
+    for rx in EPISODE_RES:
+        m = rx.search(tail)
+        if not m:
+            continue
+        groups = m.groupdict()
+        a = int(groups["a"])
+        b = int(groups["b"]) if groups.get("b") else None
+        first, last = (a, b) if b is not None else (1, a)
+        if first > last:
+            first, last = last, first
+        total_text = groups.get("total")
+        total = int(total_text) if total_text and total_text.isdigit() else None
+        return _Episodes(
+            first=first,
+            last=last,
+            total=total,
+            open_ended=bool(groups.get("open") or groups.get("plus")),
+            season=int(groups["s"]) if groups.get("s") else None,
+        )
+    return _Episodes()
 
 
 def _find_source(tail: str) -> str | None:
